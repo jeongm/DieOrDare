@@ -1,52 +1,23 @@
-# copied and pasted from https://www.samyzaf.com/ML/rl/qmaze.html
-# without the original author's consent (yet)
-
 from __future__ import print_function
-import os, sys, time, datetime, json, random
-import numpy as np
-from keras.models import Sequential
+from keras.models import Sequential, model_from_json
 from keras.layers.core import Dense, Activation
 from keras.optimizers import SGD , Adam, RMSprop
 from keras.layers.advanced_activations import PReLU
-import matplotlib.pyplot as plt
+import datetime
+import enum
+import json
+import numpy as np
+import os
+import random
+import sys
 import tensorflow
+import time
 
-maze = np.array([
-    [ 1.,  0.,  1.,  1.,  1.,  1.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  1.,  1.,  1.,  0.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  1.,  1.,  1.,  0.,  1.,  1.,  1.,  1.],
-    [ 0.,  0.,  1.,  0.,  0.,  1.,  0.,  1.,  1.,  1.],
-    [ 1.,  1.,  0.,  1.,  0.,  1.,  0.,  0.,  0.,  1.],
-    [ 1.,  1.,  0.,  1.,  0.,  1.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  1.,  1.,  1.,  1.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  1.,  1.,  1.,  1.,  0.,  0.,  0.,  0.],
-    [ 1.,  0.,  0.,  0.,  0.,  0.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  1.,  1.,  1.,  1.,  1.,  0.,  1.,  1.]
-])
-
-visited_mark = 0.8  # Cells visited by the rat will be painted by gray 0.8
-rat_mark = 0.5      # The current rat cell will be painteg by gray 0.5
-LEFT = 0
-UP = 1
-RIGHT = 2
-DOWN = 3
-
-# Actions dictionary
-actions_dict = {
-    LEFT: 'left',
-    UP: 'up',
-    RIGHT: 'right',
-    DOWN: 'down',
-}
-
-num_actions = len(actions_dict)
-
-# Exploration factor
-epsilon = 0.1
-
-# maze is a 2d Numpy array of floats between 0.0 to 1.0
-# 1.0 corresponds to a free cell, and 0.0 an occupied cell
-# rat = (row, col) initial rat position (defaults to (0,0))
+class Action(enum.Enum):
+    LEFT = 0
+    UP = 1
+    RIGHT = 2
+    DOWN = 3
 
 
 class Qmaze(object):
@@ -86,13 +57,13 @@ class Qmaze(object):
             nmode = 'blocked'
         elif action in valid_actions:
             nmode = 'valid'
-            if action == LEFT:
+            if action == Action.LEFT.value:
                 ncol -= 1
-            elif action == UP:
+            elif action == Action.UP.value:
                 nrow -= 1
-            if action == RIGHT:
+            if action == Action.RIGHT.value:
                 ncol += 1
-            elif action == DOWN:
+            elif action == Action.DOWN.value:
                 nrow += 1
         else:                  # invalid action, no change in rat position
             mode = 'invalid'
@@ -179,71 +150,6 @@ class Qmaze(object):
 
         return actions
 
-def show(qmaze):
-    plt.grid('on')
-    nrows, ncols = qmaze.maze.shape
-    ax = plt.gca()
-    ax.set_xticks(np.arange(0.5, nrows, 1))
-    ax.set_yticks(np.arange(0.5, ncols, 1))
-    ax.set_xticklabels([])
-    ax.set_yticklabels([])
-    canvas = np.copy(qmaze.maze)
-    for row,col in qmaze.visited:
-        canvas[row,col] = 0.6
-    rat_row, rat_col, _ = qmaze.state
-    canvas[rat_row, rat_col] = 0.3   # rat cell
-    canvas[nrows-1, ncols-1] = 0.9 # cheese cell
-    img = plt.imshow(canvas, interpolation='none', cmap='gray')
-    return img
-
-maze = [
-    [ 1.,  0.,  1.,  1.,  1.,  1.,  1.,  1.],
-    [ 1.,  0.,  1.,  1.,  1.,  0.,  1.,  1.],
-    [ 1.,  1.,  1.,  1.,  0.,  1.,  0.,  1.],
-    [ 1.,  1.,  1.,  0.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  0.,  1.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  1.,  0.,  1.,  0.,  0.,  0.],
-    [ 1.,  1.,  1.,  0.,  1.,  1.,  1.,  1.],
-    [ 1.,  1.,  1.,  1.,  0.,  1.,  1.,  1.]
-]
-
-qmaze = Qmaze(maze)
-canvas, reward, game_over = qmaze.act(DOWN)
-print("reward=", reward)
-show(qmaze)
-
-
-qmaze.act(DOWN)  # move down
-qmaze.act(RIGHT)  # move right
-qmaze.act(RIGHT)  # move right
-qmaze.act(RIGHT)  # move right
-qmaze.act(UP)  # move up
-show(qmaze)
-
-def play_game(model, qmaze, rat_cell):
-    qmaze.reset(rat_cell)
-    envstate = qmaze.observe()
-    while True:
-        prev_envstate = envstate
-        # get next action
-        q = model.predict(prev_envstate)
-        action = np.argmax(q[0])
-
-        # apply action, get rewards and new state
-        envstate, reward, game_status = qmaze.act(action)
-        if game_status == 'win':
-            return True
-        elif game_status == 'lose':
-            return False
-
-def completion_check(model, qmaze):
-    for cell in qmaze.free_cells:
-        if not qmaze.valid_actions(cell):
-            return False
-        if not play_game(model, qmaze, cell):
-            return False
-    return True
-
 
 class Experience(object):
     def __init__(self, model, max_memory=100, discount=0.95):
@@ -284,13 +190,9 @@ class Experience(object):
                 targets[i, action] = reward + self.discount * Q_sa
         return inputs, targets
 
-def qtrain(model, maze, **opt):
-    global epsilon
-    n_epoch = opt.get('n_epoch', 15000)
-    max_memory = opt.get('max_memory', 1000)
-    data_size = opt.get('data_size', 50)
-    weights_file = opt.get('weights_file', "")
-    name = opt.get('name', 'model')
+def qtrain(model, maze, n_epoch=15000, max_memory=1000, data_size=50, weights_file='', name='model'):
+    # Exploration factor
+    epsilon = 0.1
     start_time = datetime.datetime.now()
 
     # If you want to continue training from a previous model,
@@ -309,7 +211,6 @@ def qtrain(model, maze, **opt):
     n_free_cells = len(qmaze.free_cells)
     hsize = qmaze.maze.size//2   # history window size
     win_rate = 0.0
-    imctr = 1
 
     for epoch in range(n_epoch):
         loss = 0.0
@@ -364,11 +265,11 @@ def qtrain(model, maze, **opt):
         dt = datetime.datetime.now() - start_time
         t = format_time(dt.total_seconds())
         template = "Epoch: {:03d}/{:d} | Loss: {:.4f} | Episodes: {:d} | Win count: {:d} | Win rate: {:.3f} | time: {}"
-        print(template.format(epoch, n_epoch-1, loss, n_episodes, sum(win_history), win_rate, t))
+        print(template.format(epoch+1, n_epoch, loss, n_episodes, sum(win_history), win_rate, t))
         # we simply check if training has exhausted all free cells and if in all
         # cases the agent won
         if win_rate > 0.9 : epsilon = 0.05
-        if sum(win_history[-hsize:]) == hsize and completion_check(model, qmaze):
+        if sum(win_history[-hsize:]) == hsize:
             print("Reached 100%% win rate at epoch: %d" % (epoch,))
             break
 
@@ -398,16 +299,8 @@ def format_time(seconds):
         h = seconds / 3600.0
         return "%.2f hours" % (h,)
 
-def build_model(maze, lr=0.001):
-    model = Sequential()
-    model.add(Dense(maze.size, input_shape=(maze.size,)))
-    model.add(PReLU())
-    model.add(Dense(maze.size))
-    model.add(PReLU())
-    model.add(Dense(num_actions))
-    model.compile(optimizer='adam', loss='mse')
-    return model
-
+rat_mark = 0.5      # The current rat cell will be painteg by gray 0.5
+num_actions = len(Action)
 maze =  np.array([
     [ 1.,  0.,  1.,  1.,  1.,  1.,  1.],
     [ 1.,  1.,  1.,  0.,  0.,  1.,  0.],
@@ -417,9 +310,28 @@ maze =  np.array([
     [ 1.,  0.,  1.,  1.,  1.,  1.,  1.],
     [ 1.,  1.,  1.,  0.,  1.,  1.,  1.]
 ])
-
 qmaze = Qmaze(maze)
-show(qmaze)
 
-model = build_model(maze)
-qtrain(model, maze, epochs=1000, max_memory=8*maze.size, data_size=32)
+def build_model(maze, architecture_file=''):
+    if architecture_file:
+        print("loading architecture from file: %s" % (architecture_file,))
+        model =  model_from_json(json.load(open(architecture_file)))
+    else:
+        model = Sequential()
+        model.add(Dense(maze.size, input_shape=(maze.size,)))
+        model.add(PReLU())
+        model.add(Dense(maze.size))
+        model.add(PReLU())
+        model.add(Dense(num_actions))
+    model.compile(optimizer='adam', loss='mse')
+    return model
+
+model = build_model(maze, 'model.json')
+# model = Sequential()
+# model.add(Dense(maze.size, input_shape=(maze.size,)))
+# model.add(PReLU())
+# model.add(Dense(maze.size))
+# model.add(PReLU())
+# model.add(Dense(num_actions))
+# model.compile(optimizer='adam', loss='mse')
+qtrain(model, maze, max_memory=8*maze.size, data_size=32)
